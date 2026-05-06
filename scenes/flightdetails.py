@@ -11,7 +11,7 @@ FLIGHT_NO_POSITION = (1, 21)
 FLIGHT_NO_TEXT_HEIGHT = 8  # based on font size
 FLIGHT_NO_FONT = fonts.small
 
-FLIGHT_NUMBER_ALPHA_COLOUR = colours.BLUE
+FLIGHT_NUMBER_ALPHA_COLOUR = colours.BLUE_LIGHT
 FLIGHT_NUMBER_NUMERIC_COLOUR = colours.BLUE_LIGHT
 
 DATA_INDEX_POSITION = (52, 21)
@@ -45,10 +45,10 @@ class FlightDetailsScene(object):
         # Draw flight number if available
         flight_no_text_length = 0
         if (
-            self._data[self._data_index]["callsign"]
-            and self._data[self._data_index]["callsign"] != "N/A"
+            self._data[self._data_index]["flnum"]
+            and self._data[self._data_index]["flnum"] != "N/A"
         ):
-            flight_no = f'{self._data[self._data_index]["callsign"]}'
+            flight_no = f'{self._data[self._data_index]["flnum"]}'
 
             for ch in flight_no:
                 ch_length = graphics.DrawText(

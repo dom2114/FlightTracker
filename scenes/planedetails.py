@@ -10,6 +10,12 @@ PLANE_TEXT_HEIGHT = 9
 PLANE_FONT = fonts.regular
 
 
+def heading_to_ordinal(degrees):
+    directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+    index = round(degrees % 360 / 45) % 8
+    return directions[index]
+
+
 class PlaneDetailsScene(object):
     def __init__(self):
         super().__init__()
@@ -24,6 +30,14 @@ class PlaneDetailsScene(object):
             return
 
         plane = f'{self._data[self._data_index]["plane"]}'
+        height = f'{self._data[self._data_index]["altitude"]}'
+        height = f"{int(height):,}"
+        speed = f'{self._data[self._data_index]["speed"]}'
+        heading = f'{self._data[self._data_index]["heading"]}'
+        reg = f'{self._data[self._data_index]["registration"]}'
+        ordinal = heading_to_ordinal(int(heading))
+
+        plane = plane + " - " + reg + " - Alt " + height + "' - Hdg " + heading + "° (" + ordinal + ") - GS " + speed + " kts"
 
         # Draw background
         self.draw_square(
@@ -45,7 +59,7 @@ class PlaneDetailsScene(object):
         )
 
         # Handle scrolling
-        self.plane_position -= 1
+        self.plane_position -= 3.3
         if self.plane_position + text_length < 0:
             self.plane_position = screen.WIDTH
             if len(self._data) > 1:

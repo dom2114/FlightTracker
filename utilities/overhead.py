@@ -1,36 +1,43 @@
-from FlightRadar24.api import FlightRadar24API
 from threading import Thread, Lock
 from time import sleep
+from types import SimpleNamespace
+import csv
+import io
 import math
+import re
 
-from requests.exceptions import ConnectionError
-from urllib3.exceptions import NewConnectionError
-from urllib3.exceptions import MaxRetryError
+import requests
 
 try:
-    # Attempt to load config data
     from config import MIN_ALTITUDE
-
 except (ModuleNotFoundError, NameError, ImportError):
-    # If there's no config data
     MIN_ALTITUDE = 0  # feet
+
+try:
+    from config import SEARCH_RADIUS_NM
+except (ModuleNotFoundError, NameError, ImportError):
+    SEARCH_RADIUS_NM = 100  # nautical miles, max 250 on airplanes.live
 
 RETRIES = 3
 RATE_LIMIT_DELAY = 1
 MAX_FLIGHT_LOOKUP = 5
-MAX_ALTITUDE = 10000  # feet
+MAX_ALTITUDE = 60000  # feet
 EARTH_RADIUS_KM = 6371
 BLANK_FIELDS = ["", "N/A", "NONE"]
+HTTP_TIMEOUT = 10
+
+LIVE_URL = "https://api.airplanes.live/v2/point/{lat}/{lon}/{nm}"
+ROUTE_URL = "https://vrs-standing-data.adsb.lol/routes/{prefix}/{cs}.json"
+AIRLINES_URL = "https://raw.githubusercontent.com/vradarserver/standing-data/main/airlines/schema-01/airlines.csv"
+CALLSIGN_RE = re.compile(r"^([A-Z]{3})(\d+[A-Z0-9]*)$")
 
 try:
-    # Attempt to load config data
     from config import ZONE_HOME, LOCATION_HOME
 
     ZONE_DEFAULT = ZONE_HOME
     LOCATION_DEFAULT = LOCATION_HOME
 
 except (ModuleNotFoundError, NameError, ImportError):
-    # If there's no config data
     ZONE_DEFAULT = {"tl_y": 62.61, "tl_x": -13.07, "br_y": 49.71, "br_x": 3.46}
     LOCATION_DEFAULT = [51.509865, -0.118092, EARTH_RADIUS_KM]
 
@@ -62,103 +69,186 @@ def distance_from_flight_to_home(flight, home=LOCATION_DEFAULT):
         return dist
 
     except AttributeError:
-        # on error say it's far away
         return 1e6
+
+
+def _to_flight(ac):
+    alt = ac.get("alt_baro")
+    if alt == "ground" or alt is None:
+        return None
+    try:
+        altitude = int(alt)
+    except (TypeError, ValueError):
+        return None
+
+    lat = ac.get("lat")
+    lon = ac.get("lon")
+    if lat is None or lon is None:
+        return None
+
+    callsign = (ac.get("flight") or "").strip()
+    plane = (ac.get("desc") or "").strip()
+    registration = (ac.get("r") or "").strip()
+
+    speed = ac.get("gs")
+    try:
+        speed = int(round(float(speed))) if speed is not None else 0
+    except (TypeError, ValueError):
+        speed = 0
+
+    track = ac.get("track")
+    try:
+        heading = f"{int(round(float(track))) % 360:03d}"
+    except (TypeError, ValueError):
+        heading = "000"
+
+    vertical = ac.get("baro_rate")
+    if vertical is None:
+        vertical = ac.get("geom_rate")
+    if vertical is None:
+        vertical = 0
+
+    return SimpleNamespace(
+        latitude=lat,
+        longitude=lon,
+        altitude=altitude,
+        callsign=callsign,
+        vertical_speed=vertical,
+        plane=plane,
+        registration=registration,
+        speed=speed,
+        heading=heading,
+    )
 
 
 class Overhead:
     def __init__(self):
-        self._api = FlightRadar24API()
         self._lock = Lock()
         self._data = []
         self._new_data = False
         self._processing = False
+        self._route_cache = {}
+        self._iata_map = self._load_airline_iata_map()
+
+    def _load_airline_iata_map(self):
+        try:
+            r = requests.get(AIRLINES_URL, timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+            reader = csv.DictReader(io.StringIO(r.text))
+            mapping = {}
+            for row in reader:
+                icao = (row.get("ICAO") or "").strip().upper()
+                iata = (row.get("IATA") or "").strip().upper()
+                if icao and iata:
+                    mapping[icao] = iata
+            return mapping
+        except (requests.RequestException, ValueError, csv.Error):
+            return {}
+
+    def _callsign_to_flnum(self, callsign):
+        if not callsign:
+            return ""
+        cs = callsign.upper()
+        m = CALLSIGN_RE.match(cs)
+        if not m:
+            return callsign
+        icao, suffix = m.group(1), m.group(2)
+        iata = self._iata_map.get(icao)
+        if not iata:
+            return callsign
+        return f"{iata}{suffix}"
 
     def grab_data(self):
         Thread(target=self._grab_data).start()
 
+    def _fetch_aircraft(self):
+        url = LIVE_URL.format(
+            lat=LOCATION_DEFAULT[0],
+            lon=LOCATION_DEFAULT[1],
+            nm=SEARCH_RADIUS_NM,
+        )
+        r = requests.get(url, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+        return r.json().get("ac", []) or []
+
+    def _lookup_route(self, callsign):
+        if not callsign or len(callsign) < 2:
+            return ("", "")
+        if callsign in self._route_cache:
+            return self._route_cache[callsign]
+
+        result = ("", "")
+        try:
+            url = ROUTE_URL.format(prefix=callsign[:2], cs=callsign)
+            r = requests.get(url, timeout=HTTP_TIMEOUT)
+            if r.status_code == 200:
+                payload = r.json()
+                iata = payload.get("_airport_codes_iata", "") or ""
+                if "-" in iata:
+                    origin, destination = iata.split("-", 1)
+                    result = (origin.strip(), destination.strip())
+        except (requests.RequestException, ValueError):
+            pass
+
+        self._route_cache[callsign] = result
+        return result
+
     def _grab_data(self):
-        # Mark data as old
         with self._lock:
             self._new_data = False
             self._processing = True
 
         data = []
 
-        # Grab flight details
         try:
-            bounds = self._api.get_bounds(ZONE_DEFAULT)
-            flights = self._api.get_flights(bounds=bounds)
+            aircraft = self._fetch_aircraft()
 
-            # Sort flights by closest first
+            flights = [_to_flight(ac) for ac in aircraft]
             flights = [
-                f
-                for f in flights
-                if f.altitude < MAX_ALTITUDE and f.altitude > MIN_ALTITUDE
+                f for f in flights
+                if f is not None
+                and f.altitude < MAX_ALTITUDE
+                and f.altitude > MIN_ALTITUDE
             ]
             flights = sorted(flights, key=lambda f: distance_from_flight_to_home(f))
 
             for flight in flights[:MAX_FLIGHT_LOOKUP]:
-                retries = RETRIES
+                # Pace per-route HTTP calls
+                sleep(RATE_LIMIT_DELAY)
 
-                while retries:
-                    # Rate limit protection
-                    sleep(RATE_LIMIT_DELAY)
+                origin, destination = self._lookup_route(flight.callsign)
 
-                    # Grab and store details
-                    try:
-                        details = self._api.get_flight_details(flight)
+                plane = flight.plane if flight.plane.upper() not in BLANK_FIELDS else ""
+                origin = origin if origin.upper() not in BLANK_FIELDS else ""
+                destination = destination if destination.upper() not in BLANK_FIELDS else ""
+                callsign = flight.callsign if flight.callsign.upper() not in BLANK_FIELDS else ""
+                registration = flight.registration if flight.registration.upper() not in BLANK_FIELDS else ""
+                flnum = self._callsign_to_flnum(callsign)
 
-                        # Get plane type
-                        try:
-                            plane = details["aircraft"]["model"]["text"]
-                        except (KeyError, TypeError):
-                            plane = ""
-
-                        # Tidy up what we pass along
-                        plane = plane if not (plane.upper() in BLANK_FIELDS) else ""
-
-                        origin = (
-                            flight.origin_airport_iata
-                            if not (flight.origin_airport_iata.upper() in BLANK_FIELDS)
-                            else ""
-                        )
-
-                        destination = (
-                            flight.destination_airport_iata
-                            if not (flight.destination_airport_iata.upper() in BLANK_FIELDS)
-                            else ""
-                        )
-
-                        callsign = (
-                            flight.callsign
-                            if not (flight.callsign.upper() in BLANK_FIELDS)
-                            else ""
-                        )
-
-                        data.append(
-                            {
-                                "plane": plane,
-                                "origin": origin,
-                                "destination": destination,
-                                "vertical_speed": flight.vertical_speed,
-                                "altitude": flight.altitude,
-                                "callsign": callsign,
-                            }
-                        )
-                        break
-
-                    except (KeyError, AttributeError):
-                        retries -= 1
+                data.append(
+                    {
+                        "plane": plane,
+                        "origin": origin,
+                        "destination": destination,
+                        "vertical_speed": flight.vertical_speed,
+                        "altitude": flight.altitude,
+                        "callsign": callsign,
+                        "registration": registration,
+                        "flnum": flnum,
+                        "speed": flight.speed,
+                        "heading": flight.heading,
+                    }
+                )
 
             with self._lock:
                 self._new_data = True
                 self._processing = False
                 self._data = data
 
-        except (ConnectionError, NewConnectionError, MaxRetryError):
-            self._new_data = False
-            self._processing = False
+        except requests.RequestException:
+            with self._lock:
+                self._new_data = False
+                self._processing = False
 
     @property
     def new_data(self):
@@ -181,12 +271,11 @@ class Overhead:
         return len(self._data) == 0
 
 
-# Main function
 if __name__ == "__main__":
 
     o = Overhead()
     o.grab_data()
-    while not o.new_data:
+    while o.processing:
         print("processing...")
         sleep(1)
 
