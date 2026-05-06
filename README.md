@@ -1,8 +1,47 @@
-# FLIGHT TRACKING NOT WORKING 🚨🚁
+# RGB Matrix Flight Tracker — `dom2114` fork
 
-FlightRader24 have restricted usage of their API which has affected this project's ability to pull in overhead flight data. I expect that the simplest solution would be for people to apply for an API key and I'll add somewhere in the config to set it. I'm unlikely to have time to look into this soon so if anyone else wants to tackle it then just send me a pull-request.
+This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/FlightTracker). Colin's upstream relies on FlightRadar24, which restricted public API access in 2025 and broke that project. This fork swaps the data source so it works again, and adds a few display tweaks.
 
-# RBG Matrix Flight Tracker
+## Differences from upstream
+
+### Data source: airplanes.live + ADSB.lol (no API key required)
+- Replaced the `FlightRadarAPI` Python library with direct calls to two public, no-auth endpoints:
+  - `https://api.airplanes.live/v2/point/{lat}/{lon}/{nm}` — live aircraft within a search radius (position, altitude, ground speed, heading, registration)
+  - `https://vrs-standing-data.adsb.lol/routes/{prefix}/{cs}.json` — origin/destination lookup per callsign
+- Dropped Python deps that were only needed by FR24: `FlightRadarAPI`, `beautifulsoup4`, `Brotli`, `soupsieve`
+- New optional `config.py` knob: `SEARCH_RADIUS_NM` (default `100`, max `250` for airplanes.live)
+
+### Higher altitude ceiling
+- `MAX_ALTITUDE` raised from 10,000 ft to 60,000 ft so cruising airliners and business jets are no longer filtered out
+
+### Flight numbers shown in IATA format (e.g. `AA100`, not `AAL100`)
+- airplanes.live broadcasts ADS-B callsigns in ICAO format (e.g. `AAL100` for "American 100"); IATA format (`AA100`) is what passengers actually see on tickets and boards
+- On startup, [`utilities/overhead.py`](utilities/overhead.py) downloads the [vradarserver airlines dataset](https://github.com/vradarserver/standing-data) once (~1,400 ICAO→IATA mappings) and caches it in memory
+- Each flight's callsign is converted to its IATA-format flight number for display
+- Falls back to the raw callsign when the airline isn't in the mapping (e.g. private registrations like `N12345`)
+
+### Richer scrolling plane-details line
+- The bottom scrolling line now shows: aircraft type, registration, altitude (with thousands separator), heading in degrees, ordinal compass direction, and ground speed in knots. For example:
+  > `A320 - N123AA - Alt 35,000' - Hdg 270° (W) - GS 450 kts`
+- New `heading_to_ordinal()` helper converts a heading in degrees to a compass ordinal (`N`, `NE`, `E`, …)
+- Scroll speed increased from 1 px/frame to 3.3 px/frame so the longer text loops in a comparable on-screen time
+
+### Flight-number colour tweak
+- Alpha portion of the flight number recoloured (`colours.BLUE` → `colours.BLUE_LIGHT`) so it matches the numeric portion for a uniform look
+
+## Files changed vs upstream
+
+| File | Change |
+|---|---|
+| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
+| [`scenes/flightdetails.py`](scenes/flightdetails.py) | Render `flnum` (IATA marketing number) instead of raw callsign; alpha-colour tweak |
+| [`scenes/planedetails.py`](scenes/planedetails.py) | Add `heading_to_ordinal()`; build richer plane-details line; faster scroll |
+| [`requirements.txt`](requirements.txt) | Drop FR24-specific dependencies |
+| [`.gitignore`](.gitignore) | Ignore local scratch folders |
+
+---
+
+# RGB Matrix Flight Tracker
 
 - 📖 [Blog post about this project](https://blog.colinwaddell.com/flight-tracker/)
 - ☢️ [Why you should **avoid** buying this pre-built from Flight Tracker LED](https://colinwaddell.com/articles/flight-tracker-led-ripoff-part-2-its-so-much-worse)
