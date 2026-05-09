@@ -7,13 +7,11 @@
 # panel with the PWM solder bridge added. If your hardware differs, see the README.
 
 # Bounding box of the area to display flights from.
-# Set to None to disable rectangle filtering (search radius alone defines the area).
-ZONE_HOME = {
-    "tl_y": 51.7,   # Top-Left latitude  (deg) — north edge
-    "tl_x": -0.7,   # Top-Left longitude (deg) — west edge
-    "br_y": 51.3,   # Bottom-Right latitude  (deg) — south edge
-    "br_x": 0.0,    # Bottom-Right longitude (deg) — east edge
-}
+# Set to None to use the search radius alone (no rectangle filter).
+# To enable, replace with a dict, e.g.
+#     ZONE_HOME = {"tl_y": 51.187, "tl_x": -0.944, "br_y": 50.787, "br_x": -0.544}
+# where tl_y/tl_x are the top-left (NW) lat/long and br_y/br_x are the bottom-right (SE).
+ZONE_HOME = None
 
 # Centre of the live-aircraft search; also used to compute distance to each plane.
 LOCATION_HOME = [
@@ -23,8 +21,8 @@ LOCATION_HOME = [
 ]
 
 # Radius (nautical miles) of the airplanes.live live-aircraft query. Max 250.
-# This sets how big a circle is fetched from the API; ZONE_HOME then narrows it further.
-SEARCH_RADIUS_NM = 100
+# 10 NM ≈ 18.5 km — tight, just overhead traffic. Bump higher to widen the catchment.
+SEARCH_RADIUS_NM = 10
 
 # Weather display
 WEATHER_LOCATION = "Midhurst,West Sussex,UK"
