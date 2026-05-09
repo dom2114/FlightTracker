@@ -42,3 +42,14 @@ JOURNEY_BLANK_FILLER = " ? "
 # True → rgb-matrix uses `adafruit-hat-pwm` mapping (cleaner display, no audio).
 # False → uses plain `adafruit-hat` mapping.
 HAT_PWM_ENABLED = True
+
+# Optional: real marketing flight numbers for compressed callsigns.
+# Without a key, the cheap ICAO→IATA prefix swap is used — correct for legacy
+# carriers (BA, LH, AA) but wrong for low-cost carriers (Ryanair, easyJet, Wizz)
+# whose operational callsigns are compressed (e.g. EZY76HE actually maps to
+# marketing flight U28706, not U276HE).
+# When set, the tracker queries airlabs.co by aircraft hex code for compressed
+# callsigns only — legacy carriers cost zero API calls. Sign up free at
+# https://airlabs.co/signup (1000 calls/month free tier).
+AIRLABS_API_KEY = ""
+AIRLABS_MAX_CALLS_PER_DAY = 30   # ~900/month worst case; well under the 1000/mo cap

@@ -26,6 +26,14 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 - A startup warning is printed if the mapping cannot be loaded from network or cache (in that case the display falls back to the raw ICAO callsign)
 - Falls back to the raw callsign when the airline genuinely isn't in the mapping (e.g. private registrations like `N12345`, charter callsigns)
 
+### Optional: real marketing flight numbers for compressed callsigns (airlabs.co)
+- The cheap ICAO→IATA prefix swap above is correct for legacy carriers (BA, LH, AA, AF, KL, etc.) where the callsign suffix matches the marketing flight number. For low-cost carriers (Ryanair, easyJet, Wizz) the operational callsign is *compressed* — e.g. `EZY76HE` is the radio callsign for marketing flight `U28706`, with no deterministic relationship between `76HE` and `8706`. The mapping only exists in airline ops systems and licensed schedule data.
+- Set `AIRLABS_API_KEY` in `config.py` to enable on-demand lookups via [airlabs.co](https://airlabs.co/) for compressed callsigns. Free tier is 1000 requests/month; sign-up at https://airlabs.co/signup gives an instant key.
+- Lookup is by ADS-B hex code (since airlabs indexes by canonical callsigns rather than the operational compressed form). Pure-numeric callsigns are skipped — they cost zero API calls because the cheap conversion is already correct.
+- Results are cached by `(callsign, UTC date)` so repeated sightings of the same flight cost nothing.
+- `AIRLABS_MAX_CALLS_PER_DAY` (default 30) caps daily usage. On 401/429/HTTP errors the enricher backs off cleanly and falls back to the cheap conversion.
+- Coverage caveat: airlabs covers all major carriers but a few smaller operators (e.g. Jet2 / EXS) aren't in their dataset. Those will continue to display the cheap conversion.
+
 ### Richer scrolling plane-details line
 - The bottom scrolling line now shows: aircraft type, registration, altitude (with thousands separator), heading in degrees, ordinal compass direction, and ground speed in knots. For example:
   > `A320 - N123AA - Alt 35,000' - Hdg 270° (W) - GS 450 kts`
@@ -39,7 +47,8 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 
 | File | Change |
 |---|---|
-| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup with on-disk cache fallback; `ZONE_HOME` rectangle wired up as a real post-fetch filter; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
+| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup with on-disk cache fallback; `ZONE_HOME` rectangle wired up as a real post-fetch filter; optional airlabs.co marketing-flight-number enrichment for compressed callsigns; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
+| [`utilities/flightnumber_enricher.py`](utilities/flightnumber_enricher.py) | NEW — airlabs.co client with per-callsign caching, daily quota cap, and error backoff |
 | [`scenes/flightdetails.py`](scenes/flightdetails.py) | Render `flnum` (IATA marketing number) instead of raw callsign; alpha-colour tweak |
 | [`scenes/planedetails.py`](scenes/planedetails.py) | Add `heading_to_ordinal()`; build richer plane-details line; faster scroll |
 | [`requirements.txt`](requirements.txt) | Drop FR24-specific dependencies |

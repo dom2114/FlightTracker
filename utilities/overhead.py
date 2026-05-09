@@ -9,6 +9,11 @@ import re
 
 import requests
 
+from utilities.flightnumber_enricher import (
+    FlightNumberEnricher,
+    needs_enrichment,
+)
+
 try:
     from config import MIN_ALTITUDE
 except (ModuleNotFoundError, NameError, ImportError):
@@ -18,6 +23,16 @@ try:
     from config import SEARCH_RADIUS_NM
 except (ModuleNotFoundError, NameError, ImportError):
     SEARCH_RADIUS_NM = 100  # nautical miles, max 250 on airplanes.live
+
+try:
+    from config import AIRLABS_API_KEY
+except (ModuleNotFoundError, NameError, ImportError):
+    AIRLABS_API_KEY = ""
+
+try:
+    from config import AIRLABS_MAX_CALLS_PER_DAY
+except (ModuleNotFoundError, NameError, ImportError):
+    AIRLABS_MAX_CALLS_PER_DAY = 30
 
 RETRIES = 3
 RATE_LIMIT_DELAY = 1
@@ -108,6 +123,7 @@ def _to_flight(ac):
     callsign = (ac.get("flight") or "").strip()
     plane = (ac.get("desc") or "").strip()
     registration = (ac.get("r") or "").strip()
+    hex_code = (ac.get("hex") or "").strip()
 
     speed = ac.get("gs")
     try:
@@ -137,6 +153,7 @@ def _to_flight(ac):
         registration=registration,
         speed=speed,
         heading=heading,
+        hex=hex_code,
     )
 
 
@@ -148,6 +165,10 @@ class Overhead:
         self._processing = False
         self._route_cache = {}
         self._iata_map = self._load_airline_iata_map()
+        self._enricher = FlightNumberEnricher(
+            api_key=AIRLABS_API_KEY,
+            max_calls_per_day=AIRLABS_MAX_CALLS_PER_DAY,
+        )
 
     def _load_airline_iata_map(self):
         csv_text = None
@@ -282,6 +303,18 @@ class Overhead:
                 callsign = flight.callsign if flight.callsign.upper() not in BLANK_FIELDS else ""
                 registration = flight.registration if flight.registration.upper() not in BLANK_FIELDS else ""
                 flnum = self._callsign_to_flnum(callsign)
+
+                # For compressed callsigns (RYR/EZY/WZZ-style with letters in
+                # the suffix), the cheap prefix swap is wrong. Look up the
+                # real marketing number on airlabs.co by aircraft hex code.
+                if (
+                    self._enricher.enabled
+                    and needs_enrichment(callsign)
+                    and flight.hex
+                ):
+                    enriched = self._enricher.lookup(flight.hex, callsign)
+                    if enriched:
+                        flnum = enriched
 
                 data.append(
                     {
