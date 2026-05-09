@@ -302,19 +302,19 @@ class Overhead:
                 destination = destination if destination.upper() not in BLANK_FIELDS else ""
                 callsign = flight.callsign if flight.callsign.upper() not in BLANK_FIELDS else ""
                 registration = flight.registration if flight.registration.upper() not in BLANK_FIELDS else ""
-                flnum = self._callsign_to_flnum(callsign)
 
-                # For compressed callsigns (RYR/EZY/WZZ-style with letters in
-                # the suffix), the cheap prefix swap is wrong. Look up the
-                # real marketing number on airlabs.co by aircraft hex code.
-                if (
-                    self._enricher.enabled
-                    and needs_enrichment(callsign)
-                    and flight.hex
-                ):
-                    enriched = self._enricher.lookup(flight.hex, callsign)
-                    if enriched:
-                        flnum = enriched
+                # Compressed callsigns (RYR/EZY/EXS-style with letters in the
+                # suffix) make the cheap prefix swap synthetic — e.g. EXS17TU
+                # is not Jet2's marketing flight LS17TU. Try airlabs by hex,
+                # and if no real flight number comes back, fall back to the
+                # raw callsign rather than fabricate one.
+                if needs_enrichment(callsign):
+                    enriched = None
+                    if self._enricher.enabled and flight.hex:
+                        enriched = self._enricher.lookup(flight.hex, callsign)
+                    flnum = enriched or callsign
+                else:
+                    flnum = self._callsign_to_flnum(callsign)
 
                 data.append(
                     {

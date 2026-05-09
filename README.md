@@ -32,7 +32,7 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 - Lookup is by ADS-B hex code (since airlabs indexes by canonical callsigns rather than the operational compressed form). Pure-numeric callsigns are skipped — they cost zero API calls because the cheap conversion is already correct.
 - Results are cached by `(callsign, UTC date)` so repeated sightings of the same flight cost nothing.
 - `AIRLABS_MAX_CALLS_PER_DAY` (default 30) caps daily usage. On 401/429/HTTP errors the enricher backs off cleanly and falls back to the cheap conversion.
-- Coverage caveat: airlabs covers all major carriers but a few smaller operators (e.g. Jet2 / EXS) aren't in their dataset. Those will continue to display the cheap conversion.
+- Coverage caveat: airlabs covers all major carriers but a few smaller operators (e.g. Jet2 / EXS) aren't in their dataset. For compressed callsigns the display falls back to the raw ICAO callsign (e.g. `EXS17TU`) rather than fabricating a synthetic IATA-prefixed value (`LS17TU`) that doesn't appear on any ticket.
 
 ### Richer scrolling plane-details line
 - The bottom scrolling line now shows: aircraft type, registration, altitude (with thousands separator), heading in degrees, ordinal compass direction, and ground speed in knots. For example:
