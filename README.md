@@ -11,14 +11,20 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 - Dropped Python deps that were only needed by FR24: `FlightRadarAPI`, `beautifulsoup4`, `Brotli`, `soupsieve`
 - New optional `config.py` knob: `SEARCH_RADIUS_NM` (default `100`, max `250` for airplanes.live)
 
+### Search area: radius first, then `ZONE_HOME` rectangle
+- airplanes.live is queried as a circle of `SEARCH_RADIUS_NM` around `LOCATION_HOME`. Results are then narrowed to the `ZONE_HOME` rectangle (if set) before being displayed
+- Set `ZONE_HOME = None` (or omit it from `config.py`) to disable the rectangle filter and use the radius only
+- Upstream's `ZONE_HOME` was a no-op in earlier versions of this fork — it is now wired up
+
 ### Higher altitude ceiling
 - `MAX_ALTITUDE` raised from 10,000 ft to 60,000 ft so cruising airliners and business jets are no longer filtered out
 
 ### Flight numbers shown in IATA format (e.g. `AA100`, not `AAL100`)
 - airplanes.live broadcasts ADS-B callsigns in ICAO format (e.g. `AAL100` for "American 100"); IATA format (`AA100`) is what passengers actually see on tickets and boards
-- On startup, [`utilities/overhead.py`](utilities/overhead.py) downloads the [vradarserver airlines dataset](https://github.com/vradarserver/standing-data) once (~1,400 ICAO→IATA mappings) and caches it in memory
-- Each flight's callsign is converted to its IATA-format flight number for display
-- Falls back to the raw callsign when the airline isn't in the mapping (e.g. private registrations like `N12345`)
+- On startup, [`utilities/overhead.py`](utilities/overhead.py) downloads the [vradarserver airlines dataset](https://github.com/vradarserver/standing-data) (~1,400 ICAO→IATA mappings) and caches it both in memory and to `utilities/_airlines_cache.csv` on disk
+- On subsequent startups the cached copy is used immediately if the network fetch fails, so flight numbers keep working offline
+- A startup warning is printed if the mapping cannot be loaded from network or cache (in that case the display falls back to the raw ICAO callsign)
+- Falls back to the raw callsign when the airline genuinely isn't in the mapping (e.g. private registrations like `N12345`, charter callsigns)
 
 ### Richer scrolling plane-details line
 - The bottom scrolling line now shows: aircraft type, registration, altitude (with thousands separator), heading in degrees, ordinal compass direction, and ground speed in knots. For example:
@@ -33,11 +39,12 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 
 | File | Change |
 |---|---|
-| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
+| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup with on-disk cache fallback; `ZONE_HOME` rectangle wired up as a real post-fetch filter; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
 | [`scenes/flightdetails.py`](scenes/flightdetails.py) | Render `flnum` (IATA marketing number) instead of raw callsign; alpha-colour tweak |
 | [`scenes/planedetails.py`](scenes/planedetails.py) | Add `heading_to_ordinal()`; build richer plane-details line; faster scroll |
 | [`requirements.txt`](requirements.txt) | Drop FR24-specific dependencies |
-| [`.gitignore`](.gitignore) | Ignore local scratch folders |
+| [`config.py.example`](config.py.example) | Template config pre-tuned for an Adafruit Bonnet + PWM bridge setup; copy to `config.py` and edit location values |
+| [`.gitignore`](.gitignore) | Ignore local scratch folders + the on-disk airline-mapping cache |
 
 ---
 
@@ -98,12 +105,19 @@ curl https://raw.githubusercontent.com/adafruit/Raspberry-Pi-Installer-Scripts/m
 sudo bash /tmp/rgb-matrix.sh
 ```
 
-5. If the installation has worked successfully then there should be some demo applications available to run:
+5. If the installation has worked successfully then there should be some demo applications available to run. **For the Adafruit Bonnet you must pass `--led-gpio-mapping`** — without it the demo runs but produces a blank panel because the default `regular` mapping drives the wrong GPIO pins:
 
 ```
 cd /home/pi/rpi-rgb-led-matrix/examples-api-use
-sudo ./demo --led-rows=32 --led-cols=64 -D0
+
+# If you soldered the PWM bridge on the Bonnet (recommended):
+sudo ./demo --led-rows=32 --led-cols=64 --led-gpio-mapping=adafruit-hat-pwm -D0
+
+# If you did NOT solder the PWM bridge:
+sudo ./demo --led-rows=32 --led-cols=64 --led-gpio-mapping=adafruit-hat -D0
 ```
+
+You should see a clean rotating square. If it flickers or tears, add `--led-slowdown-gpio=2` (or `3`/`4`).
 
 ### Install this Flight Tracking software
 
@@ -132,47 +146,26 @@ pip install .
 
 ### Configure the Flight Tracking software for your location
 
-These instructions will show you how to create a config file from the command line with `nano` but in reality you can do this however you want.
+The repo ships a [`config.py.example`](config.py.example) with sane defaults for an Adafruit Bonnet + PWM-bridge setup. Copy it and edit the location values:
 
 ```
-cd /home/pi/FlightTracker 
+cd /home/pi/FlightTracker
+cp config.py.example config.py
 nano config.py
 ```
 
-Here is an example config you can copy into that file:
+The values you'll most likely want to change are `LOCATION_HOME` (your latitude/longitude), `ZONE_HOME` (the bounding box of the area you care about), `WEATHER_LOCATION`, and `JOURNEY_CODE_SELECTED` (your nearest airport's IATA code).
 
-```
-ZONE_HOME = {
-    "tl_y": 56.06403, # Top-Left Latitude (deg)
-    "tl_x": -4.51589, # Top-Left Longitude (deg)
-    "br_y": 55.89088, # Bottom-Right Latitude (deg)
-    "br_x": -4.19694 # Bottom-Right Longitude (deg)
-}
-LOCATION_HOME = [
-    55.9074356, # Latitude (deg)
-    -4.3331678, # Longitude (deg)
-    0.01781 # Altitude (km)
-]
-WEATHER_LOCATION = "Glasgow"
-OPENWEATHER_API_KEY = "" # Get an API key from https://openweathermap.org/price
-TEMPERATURE_UNITS = "metric"
-MIN_ALTITUDE = 100
-BRIGHTNESS = 50
-GPIO_SLOWDOWN = 2
-JOURNEY_CODE_SELECTED = "GLA"
-JOURNEY_BLANK_FILLER = " ? "
-HAT_PWM_ENABLED = True
-```
+The hardware-specific values (`HAT_PWM_ENABLED`, `GPIO_SLOWDOWN`, `BRIGHTNESS`) are pre-set for an Adafruit Bonnet with the PWM solder bridge — leave them alone unless your hardware differs.
 
 To save and exit nano hit `Ctrl-X` followed by `Y`.
-
-In reality you'll want to customise `config.py` for your own purposes.
 
 ### Configuration file details 
 
 | Variable                 | Description |
 |--------------------------|-------------|
-| `ZONE_HOME`              | Defines the area within which flights should be tracked. |
+| `ZONE_HOME`              | Bounding box (lat/long rectangle) within which flights are displayed. Applied *after* the radius fetch, so the search circle must be large enough to cover the rectangle. Set to `None` to disable rectangle filtering. |
+| `SEARCH_RADIUS_NM`       | Radius of the airplanes.live live-aircraft query in nautical miles. Default `100`, max `250`. *(Optional)* |
 | `LOCATION_HOME`          | Latitude/longitude of your home. |
 | `WEATHER_LOCATION`       | City used to display the temperature. Format: `"City"` or `"City,Province/State,Country"` (e.g., `"Paris"` or `"Paris,Ile-de-France,FR"`). |
 | `OPENWEATHER_API_KEY`    | If provided, enables OpenWeather API. [Get a free key here](https://openweathermap.org/price). *(Optional)* |
@@ -189,10 +182,10 @@ In reality you'll want to customise `config.py` for your own purposes.
 
 Previous versions of the instructions always pointed out to run everything as root for performance reasons but for security I think this is best avoided. Plus the latest version of the GPIO driver and rgb-matrix have strong opinions about who is in charge when running as root.
 
-To avoid running as root and to grant Python permission to set real-time scheduling priorities, run the command:
+To avoid running as root and to grant Python permission to set real-time scheduling priorities, grant the capability to the venv's Python interpreter (this survives OS Python upgrades and only affects this venv):
 
 ```
-sudo setcap 'cap_sys_nice=eip' /usr/bin/python3.11 
+sudo setcap 'cap_sys_nice=eip' /home/pi/FlightTracker/env/bin/python3
 ```
 
 ### Running the software manually

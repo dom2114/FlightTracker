@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import csv
 import io
 import math
+import os
 import re
 
 import requests
@@ -31,15 +32,33 @@ ROUTE_URL = "https://vrs-standing-data.adsb.lol/routes/{prefix}/{cs}.json"
 AIRLINES_URL = "https://raw.githubusercontent.com/vradarserver/standing-data/main/airlines/schema-01/airlines.csv"
 CALLSIGN_RE = re.compile(r"^([A-Z]{3})(\d+[A-Z0-9]*)$")
 
+AIRLINES_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "_airlines_cache.csv"
+)
+
 try:
-    from config import ZONE_HOME, LOCATION_HOME
-
-    ZONE_DEFAULT = ZONE_HOME
+    from config import LOCATION_HOME
     LOCATION_DEFAULT = LOCATION_HOME
-
 except (ModuleNotFoundError, NameError, ImportError):
-    ZONE_DEFAULT = {"tl_y": 62.61, "tl_x": -13.07, "br_y": 49.71, "br_x": 3.46}
     LOCATION_DEFAULT = [51.509865, -0.118092, EARTH_RADIUS_KM]
+
+try:
+    from config import ZONE_HOME
+    ZONE_DEFAULT = ZONE_HOME
+except (ModuleNotFoundError, NameError, ImportError):
+    ZONE_DEFAULT = None  # No rectangle filter — radius alone defines the area
+
+
+def _in_zone(flight, zone):
+    if zone is None:
+        return True
+    try:
+        return (
+            zone["br_y"] <= flight.latitude <= zone["tl_y"]
+            and zone["tl_x"] <= flight.longitude <= zone["br_x"]
+        )
+    except (KeyError, TypeError):
+        return True
 
 
 def distance_from_flight_to_home(flight, home=LOCATION_DEFAULT):
@@ -131,18 +150,56 @@ class Overhead:
         self._iata_map = self._load_airline_iata_map()
 
     def _load_airline_iata_map(self):
+        csv_text = None
+
+        # Try network first so we get fresh data when online.
         try:
             r = requests.get(AIRLINES_URL, timeout=HTTP_TIMEOUT)
             r.raise_for_status()
-            reader = csv.DictReader(io.StringIO(r.text))
+            csv_text = r.text
+            try:
+                with open(AIRLINES_CACHE_PATH, "w", encoding="utf-8") as fh:
+                    fh.write(csv_text)
+            except OSError:
+                pass
+        except requests.RequestException:
+            pass
+
+        # Fall back to the on-disk cache from a previous successful fetch.
+        if csv_text is None and os.path.exists(AIRLINES_CACHE_PATH):
+            try:
+                with open(AIRLINES_CACHE_PATH, "r", encoding="utf-8") as fh:
+                    csv_text = fh.read()
+            except OSError:
+                pass
+
+        if csv_text is None:
+            print(
+                "FlightTracker: could not load airline ICAO→IATA mapping "
+                "(no network and no cached copy). Flight numbers will fall back "
+                "to raw ICAO callsigns."
+            )
+            return {}
+
+        try:
+            reader = csv.DictReader(io.StringIO(csv_text))
             mapping = {}
             for row in reader:
                 icao = (row.get("ICAO") or "").strip().upper()
                 iata = (row.get("IATA") or "").strip().upper()
                 if icao and iata:
                     mapping[icao] = iata
+            if not mapping:
+                print(
+                    "FlightTracker: airline IATA mapping parsed but is empty; "
+                    "flight numbers will fall back to raw ICAO callsigns."
+                )
             return mapping
-        except (requests.RequestException, ValueError, csv.Error):
+        except (ValueError, csv.Error):
+            print(
+                "FlightTracker: failed to parse airline IATA mapping CSV; "
+                "flight numbers will fall back to raw ICAO callsigns."
+            )
             return {}
 
     def _callsign_to_flnum(self, callsign):
@@ -209,6 +266,7 @@ class Overhead:
                 if f is not None
                 and f.altitude < MAX_ALTITUDE
                 and f.altitude > MIN_ALTITUDE
+                and _in_zone(f, ZONE_DEFAULT)
             ]
             flights = sorted(flights, key=lambda f: distance_from_flight_to_home(f))
 

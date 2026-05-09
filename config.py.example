@@ -1,0 +1,46 @@
+# FlightTracker config — copy this file to `config.py` and edit the location values.
+#
+#     cp config.py.example config.py
+#     nano config.py
+#
+# Hardware values below are tuned for an Adafruit RGB Matrix Bonnet on a 64×32 HUB75
+# panel with the PWM solder bridge added. If your hardware differs, see the README.
+
+# Bounding box of the area to display flights from.
+# Set to None to disable rectangle filtering (search radius alone defines the area).
+ZONE_HOME = {
+    "tl_y": 51.7,   # Top-Left latitude  (deg) — north edge
+    "tl_x": -0.7,   # Top-Left longitude (deg) — west edge
+    "br_y": 51.3,   # Bottom-Right latitude  (deg) — south edge
+    "br_x": 0.0,    # Bottom-Right longitude (deg) — east edge
+}
+
+# Centre of the live-aircraft search; also used to compute distance to each plane.
+LOCATION_HOME = [
+    50.98689183565586,    # Latitude (deg)
+    -0.744249511524217,   # Longitude (deg)
+    0.04,                 # Altitude (km)
+]
+
+# Radius (nautical miles) of the airplanes.live live-aircraft query. Max 250.
+# This sets how big a circle is fetched from the API; ZONE_HOME then narrows it further.
+SEARCH_RADIUS_NM = 100
+
+# Weather display
+WEATHER_LOCATION = "Midhurst,West Sussex,UK"
+OPENWEATHER_API_KEY = ""        # Optional — free key from openweathermap.org
+TEMPERATURE_UNITS = "metric"    # "metric" or "imperial"
+
+# Display tuning
+MIN_ALTITUDE = 200              # Hide planes below this altitude in feet
+BRIGHTNESS = 80                 # 0–100
+GPIO_SLOWDOWN = 2               # Bump to 3–4 if the display flickers
+
+# Local airport callout — three-letter IATA code, displayed bold for matches
+JOURNEY_CODE_SELECTED = "QAI"   # Dunsfold (change to your nearest airport)
+JOURNEY_BLANK_FILLER = " ? "
+
+# Set True ONLY if you have soldered the PWM bridge on the Adafruit RGB Matrix Bonnet.
+# True → rgb-matrix uses `adafruit-hat-pwm` mapping (cleaner display, no audio).
+# False → uses plain `adafruit-hat` mapping.
+HAT_PWM_ENABLED = True
