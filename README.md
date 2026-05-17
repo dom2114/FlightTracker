@@ -9,11 +9,12 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
   - `https://api.airplanes.live/v2/point/{lat}/{lon}/{nm}` — live aircraft within a search radius (position, altitude, ground speed, heading, registration)
   - `https://vrs-standing-data.adsb.lol/routes/{prefix}/{cs}.json` — origin/destination lookup per callsign
 - Dropped Python deps that were only needed by FR24: `FlightRadarAPI`, `beautifulsoup4`, `Brotli`, `soupsieve`
-- New optional `config.py` knob: `SEARCH_RADIUS_NM` (default `100`, max `250` for airplanes.live)
+- New optional `config.py` knob: `SEARCH_RADIUS_NM` (template default `10`, max `250` for airplanes.live)
 
 ### Search area: radius with defensive client-side filter
 - airplanes.live is queried as a circle of `SEARCH_RADIUS_NM` around `LOCATION_HOME`
 - Returned aircraft are re-checked locally with a haversine distance calculation and any that fall outside `SEARCH_RADIUS_NM` are dropped — the upstream API occasionally returns craft slightly outside the requested circle, this guarantees the display honours the configured radius
+- The radius check is horizontal ground distance in nautical miles; altitude is only used later when choosing which in-radius aircraft are closest to home
 - Upstream's `ZONE_HOME` rectangle filter has been removed in this fork; the radius alone defines the search area
 
 ### Higher altitude ceiling
@@ -53,6 +54,7 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 | [`scenes/planedetails.py`](scenes/planedetails.py) | Add `heading_to_ordinal()`; build richer plane-details line; faster scroll |
 | [`requirements.txt`](requirements.txt) | Drop FR24-specific dependencies |
 | [`config.py.example`](config.py.example) | Template config pre-tuned for an Adafruit Bonnet + PWM bridge setup; copy to `config.py` and edit location values |
+| [`tests/`](tests/) | Focused unit coverage for radius filtering, distance ordering, coordinate parsing, and airlabs cache reuse |
 | [`.gitignore`](.gitignore) | Ignore local scratch folders + the on-disk airline-mapping cache |
 
 ---
@@ -134,7 +136,7 @@ You should see a clean rotating square. If it flickers or tears, add `--led-slow
 
 ```
 cd /home/pi/
-git clone https://github.com/ColinWaddell/FlightTracker
+git clone https://github.com/dom2114/FlightTracker
 ```
 
 2. Head into this repository and create a virtual environment, activate it and install all the dependencies
@@ -163,7 +165,7 @@ cp config.py.example config.py
 nano config.py
 ```
 
-The values you'll most likely want to change are `LOCATION_HOME` (your latitude/longitude), `SEARCH_RADIUS_NM` (how wide a circle around home to display), `WEATHER_LOCATION`, and `JOURNEY_CODE_SELECTED` (your nearest airport's IATA code).
+The values you'll most likely want to change are `LOCATION_HOME` (your latitude, longitude, and altitude), `SEARCH_RADIUS_NM` (how wide a circle around home to display), `WEATHER_LOCATION`, and `JOURNEY_CODE_SELECTED` (your nearest airport's IATA code).
 
 The hardware-specific values (`HAT_PWM_ENABLED`, `GPIO_SLOWDOWN`, `BRIGHTNESS`) are pre-set for an Adafruit Bonnet with the PWM solder bridge — leave them alone unless your hardware differs.
 
@@ -173,8 +175,8 @@ To save and exit nano hit `Ctrl-X` followed by `Y`.
 
 | Variable                 | Description |
 |--------------------------|-------------|
-| `SEARCH_RADIUS_NM`       | Radius (nautical miles) of the live-aircraft search around `LOCATION_HOME`. Applied both as the airplanes.live query parameter and as a client-side haversine cutoff. Default `100`, max `250`. *(Optional)* |
-| `LOCATION_HOME`          | Latitude/longitude of your home. |
+| `SEARCH_RADIUS_NM`       | Radius (nautical miles) of the live-aircraft search around `LOCATION_HOME`. Applied both as the airplanes.live query parameter and as a client-side haversine cutoff. Template default `10`, max `250`. *(Optional)* |
+| `LOCATION_HOME`          | Latitude, longitude, and altitude in kilometres for your home/search centre. |
 | `WEATHER_LOCATION`       | City used to display the temperature. Format: `"City"` or `"City,Province/State,Country"` (e.g., `"Paris"` or `"Paris,Ile-de-France,FR"`). |
 | `OPENWEATHER_API_KEY`    | If provided, enables OpenWeather API. [Get a free key here](https://openweathermap.org/price). *(Optional)* |
 | `TEMPERATURE_UNITS`      | One of `"metric"` or `"imperial"`. Defaults to `"metric"`. |
@@ -184,6 +186,8 @@ To save and exit nano hit `Ctrl-X` followed by `Y`.
 | `JOURNEY_CODE_SELECTED`  | Three-letter airport code of a local airport to display in **bold**. *(Optional)* |
 | `JOURNEY_BLANK_FILLER`   | Three-letter text used in place of an unknown airport. Defaults to `" ? "`. |
 | `HAT_PWM_ENABLED`        | Enables PWM via Pi’s soundcard. Requires [solder bridge modification](https://learn.adafruit.com/assets/57727). Defaults to `True`. |
+| `AIRLABS_API_KEY`        | Optional airlabs.co API key for real marketing flight numbers on compressed callsigns. Leave blank to disable. |
+| `AIRLABS_MAX_CALLS_PER_DAY` | Daily cap for airlabs.co enrichment calls. Defaults to `30`. |
 
 
 ### Configuring permissions to avoid running as root

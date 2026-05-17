@@ -112,6 +112,7 @@ def grab_current_temperature(location, units="metric"):
 
     except WeatherError:
         grab_weather.cache_clear()
+        return None
 
     if units == "imperial":
         current_temp = (current_temp * (9.0 / 5.0)) + 32
@@ -225,7 +226,7 @@ class WeatherScene(object):
         if current_temperature > max_temp:
             ratio = 1
         elif current_temperature > min_temp:
-            ratio = (current_temperature - min_temp) / max_temp
+            ratio = (current_temperature - min_temp) / (max_temp - min_temp)
         else:
             ratio = 0
 
@@ -356,7 +357,7 @@ class WeatherScene(object):
                 self._last_temperature_str,
             )
 
-        if self.current_temperature:
+        if self.current_temperature is not None:
             temp_str = f"{round(self.current_temperature)}°".rjust(4, " ")
 
             temp_colour = self.temperature_to_colour(self.current_temperature)

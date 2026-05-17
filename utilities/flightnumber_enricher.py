@@ -75,12 +75,15 @@ class FlightNumberEnricher:
 
     def lookup(self, hex_code, callsign):
         """Return marketing flight number for the given aircraft, or None."""
-        if not hex_code or not callsign or not self.enabled:
+        if not hex_code or not callsign:
             return None
 
         cache_key = (callsign.upper(), _today_utc())
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        if not self.enabled:
+            return None
 
         try:
             r = requests.get(

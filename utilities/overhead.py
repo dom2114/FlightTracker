@@ -22,7 +22,7 @@ except (ModuleNotFoundError, NameError, ImportError):
 try:
     from config import SEARCH_RADIUS_NM
 except (ModuleNotFoundError, NameError, ImportError):
-    SEARCH_RADIUS_NM = 100  # nautical miles, max 250 on airplanes.live
+    SEARCH_RADIUS_NM = 10  # nautical miles, max 250 on airplanes.live
 
 try:
     from config import AIRLABS_API_KEY
@@ -64,6 +64,7 @@ def _haversine_nm(lat1, lon1, lat2, lon2):
     dphi = math.radians(lat2 - lat1)
     dlam = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    a = min(1.0, max(0.0, a))
     return 2 * R_NM * math.asin(math.sqrt(a))
 
 
@@ -80,6 +81,9 @@ def distance_from_flight_to_home(flight, home=LOCATION_DEFAULT):
         altitude_km = 0.0003048 * altitude_ft
         return altitude_km + EARTH_RADIUS_KM
 
+    def km_plus_earth(altitude_km):
+        return altitude_km + EARTH_RADIUS_KM
+
     try:
         (x0, y0, z0) = polar_to_cartesian(
             flight.latitude,
@@ -87,13 +91,18 @@ def distance_from_flight_to_home(flight, home=LOCATION_DEFAULT):
             feet_to_meters_plus_earth(flight.altitude),
         )
 
-        (x1, y1, z1) = polar_to_cartesian(*home)
+        home_altitude_km = home[2] if len(home) > 2 else 0.0
+        (x1, y1, z1) = polar_to_cartesian(
+            home[0],
+            home[1],
+            km_plus_earth(home_altitude_km),
+        )
 
         dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2)
 
         return dist
 
-    except AttributeError:
+    except (AttributeError, TypeError, ValueError, IndexError):
         return 1e6
 
 
@@ -109,6 +118,11 @@ def _to_flight(ac):
     lat = ac.get("lat")
     lon = ac.get("lon")
     if lat is None or lon is None:
+        return None
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
         return None
 
     callsign = (ac.get("flight") or "").strip()
@@ -228,7 +242,14 @@ class Overhead:
         return f"{iata}{suffix}"
 
     def grab_data(self):
-        Thread(target=self._grab_data).start()
+        with self._lock:
+            if self._processing:
+                return False
+            self._new_data = False
+            self._processing = True
+
+        Thread(target=self._grab_data, daemon=True).start()
+        return True
 
     def _fetch_aircraft(self):
         url = LIVE_URL.format(
@@ -327,7 +348,8 @@ class Overhead:
                 self._processing = False
                 self._data = data
 
-        except requests.RequestException:
+        except Exception as e:
+            print(f"FlightTracker: failed to refresh aircraft data ({e})")
             with self._lock:
                 self._new_data = False
                 self._processing = False
@@ -350,7 +372,8 @@ class Overhead:
 
     @property
     def data_is_empty(self):
-        return len(self._data) == 0
+        with self._lock:
+            return len(self._data) == 0
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ try:
         HAT_PWM_ENABLED
     )
 
-except (ModuleNotFoundError, NameError):
+except (ModuleNotFoundError, NameError, ImportError):
     # If there's no config data
     BRIGHTNESS = 100
     GPIO_SLOWDOWN = 1
@@ -154,7 +154,7 @@ class Display(
         #
         # Last, if our internal store of the data
         # is empty, try and grab data
-        if not (self.overhead.processing and self.overhead.new_data) and (
+        if not self.overhead.processing and not self.overhead.new_data and (
             self._data_all_looped or len(self._data) <= 1
         ):
             self.overhead.grab_data()
