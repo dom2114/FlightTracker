@@ -55,25 +55,16 @@ try:
     from config import LOCATION_HOME
     LOCATION_DEFAULT = LOCATION_HOME
 except (ModuleNotFoundError, NameError, ImportError):
-    LOCATION_DEFAULT = [51.509865, -0.118092, EARTH_RADIUS_KM]
-
-try:
-    from config import ZONE_HOME
-    ZONE_DEFAULT = ZONE_HOME
-except (ModuleNotFoundError, NameError, ImportError):
-    ZONE_DEFAULT = None  # No rectangle filter — radius alone defines the area
+    LOCATION_DEFAULT = [51.509865, -0.118092, 0.0]
 
 
-def _in_zone(flight, zone):
-    if zone is None:
-        return True
-    try:
-        return (
-            zone["br_y"] <= flight.latitude <= zone["tl_y"]
-            and zone["tl_x"] <= flight.longitude <= zone["br_x"]
-        )
-    except (KeyError, TypeError):
-        return True
+def _haversine_nm(lat1, lon1, lat2, lon2):
+    R_NM = 3440.065  # Earth radius in nautical miles
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlam = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    return 2 * R_NM * math.asin(math.sqrt(a))
 
 
 def distance_from_flight_to_home(flight, home=LOCATION_DEFAULT):
@@ -281,13 +272,13 @@ class Overhead:
         try:
             aircraft = self._fetch_aircraft()
 
+            home_lat, home_lon = LOCATION_DEFAULT[0], LOCATION_DEFAULT[1]
             flights = [_to_flight(ac) for ac in aircraft]
             flights = [
                 f for f in flights
                 if f is not None
-                and f.altitude < MAX_ALTITUDE
-                and f.altitude > MIN_ALTITUDE
-                and _in_zone(f, ZONE_DEFAULT)
+                and MIN_ALTITUDE < f.altitude < MAX_ALTITUDE
+                and _haversine_nm(home_lat, home_lon, f.latitude, f.longitude) <= SEARCH_RADIUS_NM
             ]
             flights = sorted(flights, key=lambda f: distance_from_flight_to_home(f))
 

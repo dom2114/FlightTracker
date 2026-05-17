@@ -6,13 +6,6 @@
 # Hardware values below are tuned for an Adafruit RGB Matrix Bonnet on a 64×32 HUB75
 # panel with the PWM solder bridge added. If your hardware differs, see the README.
 
-# Bounding box of the area to display flights from.
-# Set to None to use the search radius alone (no rectangle filter).
-# To enable, replace with a dict, e.g.
-#     ZONE_HOME = {"tl_y": 51.187, "tl_x": -0.944, "br_y": 50.787, "br_x": -0.544}
-# where tl_y/tl_x are the top-left (NW) lat/long and br_y/br_x are the bottom-right (SE).
-ZONE_HOME = None
-
 # Centre of the live-aircraft search; also used to compute distance to each plane.
 LOCATION_HOME = [
     50.98689183565586,    # Latitude (deg)

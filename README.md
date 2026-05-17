@@ -11,10 +11,10 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 - Dropped Python deps that were only needed by FR24: `FlightRadarAPI`, `beautifulsoup4`, `Brotli`, `soupsieve`
 - New optional `config.py` knob: `SEARCH_RADIUS_NM` (default `100`, max `250` for airplanes.live)
 
-### Search area: radius first, then `ZONE_HOME` rectangle
-- airplanes.live is queried as a circle of `SEARCH_RADIUS_NM` around `LOCATION_HOME`. Results are then narrowed to the `ZONE_HOME` rectangle (if set) before being displayed
-- Set `ZONE_HOME = None` (or omit it from `config.py`) to disable the rectangle filter and use the radius only
-- Upstream's `ZONE_HOME` was a no-op in earlier versions of this fork — it is now wired up
+### Search area: radius with defensive client-side filter
+- airplanes.live is queried as a circle of `SEARCH_RADIUS_NM` around `LOCATION_HOME`
+- Returned aircraft are re-checked locally with a haversine distance calculation and any that fall outside `SEARCH_RADIUS_NM` are dropped — the upstream API occasionally returns craft slightly outside the requested circle, this guarantees the display honours the configured radius
+- Upstream's `ZONE_HOME` rectangle filter has been removed in this fork; the radius alone defines the search area
 
 ### Higher altitude ceiling
 - `MAX_ALTITUDE` raised from 10,000 ft to 60,000 ft so cruising airliners and business jets are no longer filtered out
@@ -47,7 +47,7 @@ This is a fork of [ColinWaddell/FlightTracker](https://github.com/ColinWaddell/F
 
 | File | Change |
 |---|---|
-| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup with on-disk cache fallback; `ZONE_HOME` rectangle wired up as a real post-fetch filter; optional airlabs.co marketing-flight-number enrichment for compressed callsigns; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
+| [`utilities/overhead.py`](utilities/overhead.py) | Data-source rewrite (FR24 → airplanes.live + ADSB.lol); ICAO→IATA airline lookup with on-disk cache fallback; client-side haversine radius filter so flights outside `SEARCH_RADIUS_NM` are never displayed; `ZONE_HOME` rectangle filter removed (radius alone defines the search area); optional airlabs.co marketing-flight-number enrichment for compressed callsigns; new fields (`registration`, `flnum`, `speed`, `heading`) in the data dict; `MAX_ALTITUDE` raised to 60,000 ft; `SEARCH_RADIUS_NM` config option |
 | [`utilities/flightnumber_enricher.py`](utilities/flightnumber_enricher.py) | NEW — airlabs.co client with per-callsign caching, daily quota cap, and error backoff |
 | [`scenes/flightdetails.py`](scenes/flightdetails.py) | Render `flnum` (IATA marketing number) instead of raw callsign; alpha-colour tweak |
 | [`scenes/planedetails.py`](scenes/planedetails.py) | Add `heading_to_ordinal()`; build richer plane-details line; faster scroll |
@@ -163,7 +163,7 @@ cp config.py.example config.py
 nano config.py
 ```
 
-The values you'll most likely want to change are `LOCATION_HOME` (your latitude/longitude), `ZONE_HOME` (the bounding box of the area you care about), `WEATHER_LOCATION`, and `JOURNEY_CODE_SELECTED` (your nearest airport's IATA code).
+The values you'll most likely want to change are `LOCATION_HOME` (your latitude/longitude), `SEARCH_RADIUS_NM` (how wide a circle around home to display), `WEATHER_LOCATION`, and `JOURNEY_CODE_SELECTED` (your nearest airport's IATA code).
 
 The hardware-specific values (`HAT_PWM_ENABLED`, `GPIO_SLOWDOWN`, `BRIGHTNESS`) are pre-set for an Adafruit Bonnet with the PWM solder bridge — leave them alone unless your hardware differs.
 
@@ -173,8 +173,7 @@ To save and exit nano hit `Ctrl-X` followed by `Y`.
 
 | Variable                 | Description |
 |--------------------------|-------------|
-| `ZONE_HOME`              | Bounding box (lat/long rectangle) within which flights are displayed. Applied *after* the radius fetch, so the search circle must be large enough to cover the rectangle. Set to `None` to disable rectangle filtering. |
-| `SEARCH_RADIUS_NM`       | Radius of the airplanes.live live-aircraft query in nautical miles. Default `100`, max `250`. *(Optional)* |
+| `SEARCH_RADIUS_NM`       | Radius (nautical miles) of the live-aircraft search around `LOCATION_HOME`. Applied both as the airplanes.live query parameter and as a client-side haversine cutoff. Default `100`, max `250`. *(Optional)* |
 | `LOCATION_HOME`          | Latitude/longitude of your home. |
 | `WEATHER_LOCATION`       | City used to display the temperature. Format: `"City"` or `"City,Province/State,Country"` (e.g., `"Paris"` or `"Paris,Ile-de-France,FR"`). |
 | `OPENWEATHER_API_KEY`    | If provided, enables OpenWeather API. [Get a free key here](https://openweathermap.org/price). *(Optional)* |
